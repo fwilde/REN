@@ -10,7 +10,9 @@ Usage
 from ren import preprocess, plot, train, test
 
 """
-yields Tensorflow tensors containing the enhanced, greyscale images and the binary masks of the ROIs for each image (target model output) for training and test
+yields Tensorflow tensors containing the enhanced, greyscale images and 
+the binary masks of the ROIs for each image (target model output) 
+for training and test
 
 """
 ```
