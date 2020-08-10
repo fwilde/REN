@@ -8,5 +8,6 @@ Installation
 
 First download the zipped repository from here or clone the repository, then install the module with
 
-.. code::
-	$ pip install -e path_to_package/
+```bash
+pip install -e path_to_package/
+```
