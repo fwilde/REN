@@ -53,13 +53,13 @@ def get_valid_file_pairs(path : str, imgtype : str = "tif", roitype : str = "zip
     roi_names = [os.path.split(x)[-1].split(".")[0] for x in roi_files]
 
     #match file pairs, image file matches roi file, if roi file name = image file[*].zip
-    matches = [np.where(np.array([roi_name.find(img_name) for img in img_names]) == 0) for roi_name in roi_names]
+    matches = [np.where(np.array([roi_name.find(img_name) for img_name in img_names]) == 0)[0] for roi_name in roi_names]
     match_roi_index = np.array(range(0,len(matches)))
-    match_counts = np.array([match.shape[0] for match in matches])
+    match_counts = np.array([match.shape for match in matches]).flatten()
 
     #discard image files with no or multiple matching roi file(s)
-    valids = match_counts == 1
-    matches = matches[valids]
+    valids = np.array(match_counts == 1)
+    matches = np.array(matches)[valids]
     match_roi_index = match_roi_index[valids]
     invalids = ~valids
     invalids_num = np.sum(invalids)

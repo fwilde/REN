@@ -5,7 +5,7 @@ setup(name = 'REN',
       description = 'ROI Extraction Net: supervised ROI extraction for microscope images using a CNN',
       author = 'Fabian Wilde',
       author_email = 'fabian.wilde@uni-greifswald.de',
-      url = 'https://github.com/fwilde/REN,
+      url = 'https://github.com/fwilde/REN',
       install = ['numpy', 'scipy', 'matplotlib', 'tensorflow', \
-                 'read-roi', 'tqdm', 'skimage', 'seaborn']
+                 'read-roi', 'tqdm', 'scikit-image', 'seaborn']
      )
