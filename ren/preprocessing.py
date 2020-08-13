@@ -1,12 +1,13 @@
 import os, sys, glob
-# import tensorflow as tf
+import tensorflow as tf
 import pandas as pd
 import numpy as np
 from read_roi import read_roi_file, read_roi_zip
 import skimage
 from tqdm import tqdm
+from typing import Dict, Tuple, List
 
-def get_valid_file_pairs(path : str, imgtype : str = "tif", roitype : str = "zip") -> dict:
+def get_valid_file_pairs(path : str, imgtype : str = "tif", roitype : str = "zip") -> Dict[Tuple[str],Tuple[str]]:
     """Lists directory content and tries to match image files of given type e.g tiff 
     with (zipped) roi files
 
@@ -34,7 +35,7 @@ def get_valid_file_pairs(path : str, imgtype : str = "tif", roitype : str = "zip
 
     if roitype == "zip":
         #test found zip files, if they contain a roi file
-        for roi_file in roi_files:
+        for roi_file in tqdm(roi_files):
             try:
                 foo=read_roi_zip(roi_file)
             except Exception:
@@ -71,7 +72,33 @@ def get_valid_file_pairs(path : str, imgtype : str = "tif", roitype : str = "zip
         raise ValueError("No valid pairs of image and roi files could be matched in the given directory.")
 
     #assemble valid pair lists
-    valid_roi_files = list(np.array(roi_files)[match_roi_index])
-    valid_img_files = list(np.array(img_files)[matches.flatten()])
+    valid_roi_files = tuple(np.array(roi_files)[match_roi_index])
+    valid_img_files = tuple(np.array(img_files)[matches.flatten()])
 
     return dict({'img':valid_img_files, 'roi':valid_roi_files})
+
+def roi_size_stats(roi_files : List[str]):
+    """
+    Function to analyze roi number and size distributions (per image). Should be used to choose an adequate tile size.
+
+    Args:
+    """
+    pass
+
+#function to randomly load one of the images and rois, randomly select a tile within that image, randomly apply a rotation.#make sure to choose a tile size so that no ROI is cut to avoid boundary effects
+
+def get_random_tile(img_file : str, roi_file : str, tile_size : Tuple[int] = (600,600), tile_overlap : int = 300, improve_tile : bool = True) -> tf.TensorArray:
+    """
+    Function to process a single (image, roi) file pair. 
+
+    Args:
+        img_file (str): path to image file
+        roi_file (str): path to roi file (*.zip or *.roi)
+        tile_size (Tuple[int]): size for tile in px
+        tile_overlap (int):  tile overlap in px
+        improve_tile (bool): flag whether selected image tile should be improved (contrast, brightness, etc...)
+
+    Returns:
+        tf.TensorArray: enhanced greyscale image tile and binary roi mask
+    """
+    pass
