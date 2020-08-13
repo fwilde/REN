@@ -7,5 +7,6 @@ setup(name = 'REN',
       author_email = 'fabian.wilde@uni-greifswald.de',
       url = 'https://github.com/fwilde/REN',
       install = ['numpy', 'scipy', 'matplotlib', 'tensorflow', \
-                 'read-roi', 'tqdm', 'scikit-image', 'seaborn']
+                 'read-roi', 'tqdm', 'scikit-image', 'tifffile', 'seaborn']
+      #for big tiffs, use osgeo.gdal instead of skimage.io.imread
      )

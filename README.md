@@ -23,6 +23,7 @@ Requirements
 * tensorflow >= 1.9
 * https://github.com/hadim/read-roi (in order to read ImageJ's ROI files)
 * scikit-image >= 0.16.2 (support for TIFFs with 16-bit color depth)
+* tifffile as plugin for skimage.io.imread
 * tqdm (fancy progress bar)
 * joblib (easy parallelization)
 * matplotlib (visualization)
@@ -35,6 +36,10 @@ First download the zipped repository from here or clone the repository, then ins
 ```bash
 pip install -e path_to_package/
 ```
+
+Notes
+-----
+It is recommened to use the module tifffile (in combination with scikit-image) to read TIFF files with 16 bit color depth. Pillow (which is integrated in matplotlib) only supports 8 bit color depth which could mean an information loss. For really big TIFFs (approx. 1 GB) used in geoinformatics e.g. satellite imagery, the module osgeo.gdal is recommened.
 
 License
 -------
