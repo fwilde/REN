@@ -7,26 +7,25 @@ Usage
 -----
 
 ```Python
-from ren import preprocess, plot, train, test
+from ren.preprocessing import get_valid_file_pairs
+
+valid_files = get_valid_file_pairs("data/", imgtype = "tif", roitype = "zip")
 
 """
-yields Tensorflow tensors containing the enhanced, greyscale images and 
-the binary masks of the ROIs for each image (target model output) 
-for training and test
-
+yields dict with ordered lists of valid image and roi file pairs
 """
 ```
 
 Requirements
 ------------
 
-* Python >= 3.5
-* Tensorflow >= 1.9
+* python >= 3.5
+* tensorflow >= 1.9
 * https://github.com/hadim/read-roi (in order to read ImageJ's ROI files)
-* Scikit-image >= 0.16.2 (for input image preprocessing)
-* Tqdm (fancy progress bar)
-* Joblib (easy parallelization)
-* Matplotlib (visualization)
+* scikit-image >= 0.16.2 (support for TIFFs with 16-bit color depth)
+* tqdm (fancy progress bar)
+* joblib (easy parallelization)
+* matplotlib (visualization)
 
 Installation
 ------------
@@ -37,4 +36,6 @@ First download the zipped repository from here or clone the repository, then ins
 pip install -e path_to_package/
 ```
 
-
+License
+-------
+All source code is under the <a href="https://opensource.org/licenses/artistic-license-2.0">Artistic License</a>
