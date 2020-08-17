@@ -96,7 +96,7 @@ def roi_size_stats(roi_files : List[str]):
 
 #function to randomly load one of the images and rois, randomly select a tile within that image, randomly apply a rotation.#make sure to choose a tile size so that no ROI is cut to avoid boundary effects
 
-def get_random_tile(img_data : np.ndarray, roi_data : np.ndarray, tile_size : Tuple[int] = (600,600), improve_tile : bool = True, rotate_tile : bool = True, improve_fn : Callable[] = None) -> Dict[tf.TensorArray,tf.TensorArray]:
+def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : int = 20, tile_size : Tuple[int,int] = (600,600), improve_tile : bool = True, rotate_tile : bool = True, mirror_tile : bool = True, improve_fn : Callable = None, dtype : tf.DType = tf.float16) -> Dict[tf.Tensor,tf.Tensor]:
     """
     Function to randomly select a tile from the image and roi data matrices.
 
@@ -105,11 +105,14 @@ def get_random_tile(img_data : np.ndarray, roi_data : np.ndarray, tile_size : Tu
         roi_data (np.ndarray): path to roi files (*.zip or *.roi)
         tile_size (Tuple[int]): size for tile in px
         rotate_tile (bool): flag whether to perform a random rotation on the image tile
+        mirror_tile (bool): flag whether to mirror the image tile along a random axis
+        check_rois (bool): flag whether to check that no roi is cut by tile boundaries
         improve_tile (bool): flag whether selected image tile should be improved (contrast, brightness, etc...)
         improve_fn (Callable): user-defined function handle to act on the selected image tile
+        dtype (tf.DType): data type for Tensorflow output array
 
     Returns:
-        tf.TensorArray: enhanced greyscale image tile and binary roi mask
+        tf.Tensor: enhanced greyscale image tiles and binary roi masks as Tensorflow Tensors
     """
     
     if not isinstance(img_data,np.ndarray):
@@ -126,23 +129,70 @@ def get_random_tile(img_data : np.ndarray, roi_data : np.ndarray, tile_size : Tu
     #check if tile_size is compatible with image size
     if (tile_size[0] >= img_dims[0])|(tile_size[1] >= img_dims[1]):
         raise ValueError("One or more dimensions of the specified tile size bigger than input image array.")
-    #get random edge
-    rand_edge_x = np.random.randint(0,high=img_dims[0]-tile_size[0])
-    rand_edge_y = np.random.randint(0,high=img_dims[1]-tile_size[1])
-    #select tile from raw image
-    tile_img = img_dat[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
-    tile_roi = roi_data[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
+
     if improve_tile:
         if callable(improve_fn):
             tile_img = improve_fn(tile_img)
         else:
             #use skimage.exposure.adjust_log, adjust_gamma and/or equalize_hist
-            pass
 
-    if rotate_tile:
+            #from the scikit-image docs:
+            #transforms the input image pixelwise according to the equation O = gain*log(1 + I) after
+            #scaling each pixel to the range [0,1]
+            #
+            #massively improves edge/texture contrast in the microscope imagery of the podocytes
+            #gamma adjust massively increases image noise and more background structures
+            img_dat = skimage.exposure.adjust_log(img_dat, gain=2)
+            #try clipping the pixel values on the lowest and highest 0.5% can improve constrast without amplifying the image noise
+    
+    #TODO: preallocation with static array should be faster...
+    out_tiles = {'img':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False), \
+                 'roi':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False)}
+    for i in range(num_tiles):
+        #get random edge
+        rand_edge_x = np.random.randint(0,high=img_dims[0]-tile_size[0])
+        rand_edge_y = np.random.randint(0,high=img_dims[1]-tile_size[1])
+
+        #select tile from raw image
+        tile_img = img_dat[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
+        tile_roi = roi_data[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
+
+        if rotate_tile:
         #rotation angle can only be an integer multiple of 90 in order to avoid clipping when matrix size should be conserved
-        tile_img = skimage.transform.rotate(tile_img, np.random.randint(0,high=3)*90, resize = False, preserve_range = True)
-        tile_roi = skimage.transform.rotate(tile_roi, np.random.randint(0, high=3)*90, resize = False, preserve_range = True)
+            tile_img = skimage.transform.rotate(tile_img, np.random.randint(0,high=3)*90, resize = False, preserve_range = True)
+            tile_roi = skimage.transform.rotate(tile_roi, np.random.randint(0, high=3)*90, resize = False, preserve_range = True)
+
+        if mirror_tile:
+            axis = np.random.randint(0,high=2)
+            #mirror along x-axis
+            if axis == 0:
+                tile_img = tile_img[::-1,:]
+                tile_roi = tile_roi[::-1,:]
+            #mirror along y-axis
+            elif axis == 1:
+                tile_img = tile_img[:,::-1]
+                tile_roi = tile_roi[::-1,:]
+            #mirror along diagonal
+            elif axis == 2:
+                tile_img = tile_img[::-1,::-1]
+                tile_roi = tile_roi[::-1,::-1]
+
+        #check if any ROI in tile is cut by tile boundaries
+        #basically check if boundary pixels are all zero
+        if check_rois:
+            boundaries=np.hstack((tile_roi[:,0],tile_roi[:,-1],tile_roi[0,:],tile_roi[-1,:])).flatten()
+            if np.any(boundaries):
+                #if any pixel on tile boundaries belongs to any roi, discard tile and start over again
+                pass
+
+        out_tiles["img"].write(tile_img)
+        out_tiles["roi"].write(tile_roi)
+
+    #transform TensorArray to Tensor
+    out_tiles["img"].stack()
+    out_tiles["roi"].stack()
+
+    return out_tiles
 
 def load_file_pair(img_file : str, roi_file : str) -> Dict[np.ndarray,np.ndarray]:
     #test if img_file contains a valid file pat
@@ -165,10 +215,43 @@ def load_file_pair(img_file : str, roi_file : str) -> Dict[np.ndarray,np.ndarray
     else:
         raise ValueError("Invalid file type for roi file.")
 
-    #convert roi polygon coordinates to binary mask
+    #extract polygon paths
+    #raw_roi---%NAME.type
+    #               .left
+    #               .top
+    #               .width
+    #               .height
+    #               .paths---List[List[Tuple]]
+    #               .name
+    #               .position
 
+    #iterate over roi groups in loaded ROI file
+    for roi_group_name in raw_roi:
+        #check roi image dimensions
+        roi_group = raw_roi[roi_group_name]
+        roi_img_height = roi_group["height"]
+        roi_img_width = roi_group["width"]
+        img_width = raw_img.shape[0]
+        img_height = raw_img.shape[1]
 
-    return raw_img, raw_roi
+        #check dimensions of area where rois have been defined and the actual raw image
+        if not (img_height >= roi_img_height):
+            raise ValueError("Image height ("+str(img_height)+") smaller than height of ROI definition area ("+str(roi_img_height)+").")            
+
+        if not (img_width >= roi_img_width):
+            raise ValueError("Image width ("+str(img_width)+") smaller than width of ROI definition area ("+str(roi_img_width)+").")
+
+    #convert roi polygon coordinates to binary mask:
+    #-extract roi polygons
+    roi_polygons = [np.array(roi,dtype=np.uint16) for roi in roi_group["paths"]]
+    #init empty mask
+    roi_mask = np.full(raw_img.shape, False, dtype=np.bool)
+    #-draw roi polygons
+    for roi_polygon in roi_polygons:
+        #logic OR to obtain compund mask of all ROIs
+        roi_mask = roi_mask | skimage.draw.polygon2mask(raw_img.shape, roi_polygon)
+    
+    return raw_img, roi_mask
 
 def generate_tile_set(img_files : Tuple[str], roi_files : Tuple[str]):
     pass
