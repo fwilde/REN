@@ -7,13 +7,17 @@ Usage
 -----
 
 ```Python
-from ren.preprocessing import get_valid_file_pairs
+from ren.preprocessing import get_valid_file_pairs, load_file_pair, get_random_tiles
 
-valid_files = get_valid_file_pairs("data/", imgtype = "tif", roitype = "zip")
+files = get_valid_file_pairs("data/", imgtype = "tif", roitype = "zip")
+# yields dict with ordered lists of valid image and roi file pairs
 
-"""
-yields dict with ordered lists of valid image and roi file pairs
-"""
+img, roi_mask = load_file_pair(files["img"][0], files["roi"][0])
+# yields raw image and rois as binary mask matrices
+
+tiles = get_random_tiles(img, roi_mask, tile_size = (600,600), num_tiles = 32, check_rois = True)
+# yields two Tensorflow TensorArrays for image and roi mask tiles
+
 ```
 
 Requirements
