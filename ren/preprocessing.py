@@ -150,7 +150,10 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
     #TODO: preallocation with static array should be faster...
     out_tiles = {'img':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False), \
                  'roi':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False)}
-    for i in tqdm(range(num_tiles)):
+
+    i = 0
+    bar = tqdm(total=num_tiles)
+    while i < num_tiles:
         #get random edge
         rand_edge_x = np.random.randint(0,high=img_dims[0]-tile_size[0])
         rand_edge_y = np.random.randint(0,high=img_dims[1]-tile_size[1])
@@ -174,7 +177,7 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
             #mirror along y-axis
             elif axis == 1:
                 tile_img = tile_img[:,::-1]
-                tile_roi = tile_roi[::-1,:]
+                tile_roi = tile_roi[:,::-1]
             #mirror along diagonal
             elif axis == 2:
                 tile_img = tile_img[::-1,::-1]
@@ -186,14 +189,18 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
             boundaries=np.hstack((tile_roi[:,0],tile_roi[:,-1],tile_roi[0,:],tile_roi[-1,:])).flatten()
             if np.any(boundaries):
                 #if any pixel on tile boundaries belongs to any roi, discard tile and start over again
-                pass
+                continue
 
         out_tiles["img"].write(i, tile_img)
         out_tiles["roi"].write(i, tile_roi)
+        i += 1
+        bar.update()
 
     #transform TensorArray to Tensor
     out_tiles["img"].stack()
     out_tiles["roi"].stack()
+
+    bar.close()
 
     return out_tiles
 
