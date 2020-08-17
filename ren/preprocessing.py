@@ -4,6 +4,9 @@ import pandas as pd
 import numpy as np
 from read_roi import read_roi_file, read_roi_zip
 import skimage
+import skimage.io
+import skimage.draw
+import skimage.transform
 from tqdm import tqdm
 from typing import Dict, Tuple, List, Callable
 import joblib
@@ -95,8 +98,7 @@ def roi_size_stats(roi_files : List[str]):
     pass
 
 #function to randomly load one of the images and rois, randomly select a tile within that image, randomly apply a rotation.#make sure to choose a tile size so that no ROI is cut to avoid boundary effects
-
-def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : int = 20, tile_size : Tuple[int,int] = (600,600), improve_tile : bool = True, rotate_tile : bool = True, mirror_tile : bool = True, improve_fn : Callable = None, dtype : tf.DType = tf.float16) -> Dict[tf.Tensor,tf.Tensor]:
+def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : int = 32, tile_size : Tuple[int,int] = (600,600), improve_tile : bool = True, rotate_tile : bool = True, mirror_tile : bool = True, check_rois : bool = True, improve_fn : Callable = None, dtype : tf.DType = tf.float16) -> Dict[tf.Tensor,tf.Tensor]:
     """
     Function to randomly select a tile from the image and roi data matrices.
 
@@ -142,25 +144,26 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
             #
             #massively improves edge/texture contrast in the microscope imagery of the podocytes
             #gamma adjust massively increases image noise and more background structures
-            img_dat = skimage.exposure.adjust_log(img_dat, gain=2)
+            img_data = skimage.exposure.adjust_log(img_data, gain=2)
             #try clipping the pixel values on the lowest and highest 0.5% can improve constrast without amplifying the image noise
     
     #TODO: preallocation with static array should be faster...
     out_tiles = {'img':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False), \
                  'roi':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False)}
-    for i in range(num_tiles):
+    for i in tqdm(range(num_tiles)):
         #get random edge
         rand_edge_x = np.random.randint(0,high=img_dims[0]-tile_size[0])
         rand_edge_y = np.random.randint(0,high=img_dims[1]-tile_size[1])
 
         #select tile from raw image
-        tile_img = img_dat[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
+        tile_img = img_data[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
         tile_roi = roi_data[rand_edge_x : rand_edge_x + tile_size[0],rand_edge_y : rand_edge_y + tile_size[1]]
 
         if rotate_tile:
         #rotation angle can only be an integer multiple of 90 in order to avoid clipping when matrix size should be conserved
-            tile_img = skimage.transform.rotate(tile_img, np.random.randint(0,high=3)*90, resize = False, preserve_range = True)
-            tile_roi = skimage.transform.rotate(tile_roi, np.random.randint(0, high=3)*90, resize = False, preserve_range = True)
+            rand_rot_angle = np.random.randint(0,high=3)*90
+            tile_img = skimage.transform.rotate(tile_img, rand_rot_angle, resize = False, preserve_range = True)
+            tile_roi = skimage.transform.rotate(tile_roi, rand_rot_angle, resize = False, preserve_range = True)
 
         if mirror_tile:
             axis = np.random.randint(0,high=2)
@@ -185,8 +188,8 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
                 #if any pixel on tile boundaries belongs to any roi, discard tile and start over again
                 pass
 
-        out_tiles["img"].write(tile_img)
-        out_tiles["roi"].write(tile_roi)
+        out_tiles["img"].write(i, tile_img)
+        out_tiles["roi"].write(i, tile_roi)
 
     #transform TensorArray to Tensor
     out_tiles["img"].stack()
@@ -250,6 +253,8 @@ def load_file_pair(img_file : str, roi_file : str) -> Dict[np.ndarray,np.ndarray
     for roi_polygon in roi_polygons:
         #logic OR to obtain compund mask of all ROIs
         roi_mask = roi_mask | skimage.draw.polygon2mask(raw_img.shape, roi_polygon)
+
+    roi_mask = roi_mask.T
     
     return raw_img, roi_mask
 
