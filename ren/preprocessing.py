@@ -9,7 +9,7 @@ import skimage.draw
 import skimage.transform
 from tqdm import tqdm
 from typing import Dict, Tuple, List, Callable
-import joblib
+from joblib import Parallel, delayed
 from multiprocessing import cpu_count
 
 """
@@ -19,7 +19,7 @@ Author:
     Fabian Wilde, Bioinformatics, University of Greifswald
 """
 
-def get_valid_file_pairs(path : str, imgtype : str = "tif", roitype : str = "zip") -> Dict[Tuple[str],Tuple[str]]:
+def get_valid_files(path : str, imgtype : str = "tif", roitype : str = "zip") -> Dict[Tuple[str],Tuple[str]]:
     """Lists directory content and tries to match image files of given type e.g tiff 
     with (zipped) roi files
 
@@ -98,7 +98,7 @@ def roi_size_stats(roi_files : List[str]):
     pass
 
 #function to randomly load one of the images and rois, randomly select a tile within that image, randomly apply a rotation.#make sure to choose a tile size so that no ROI is cut to avoid boundary effects
-def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : int = 32, tile_size : Tuple[int,int] = (600,600), improve_tile : bool = True, rotate_tile : bool = True, mirror_tile : bool = True, check_rois : bool = True, improve_fn : Callable = None, dtype : tf.DType = tf.float16) -> Dict[tf.Tensor,tf.Tensor]:
+def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : int = 32, tile_size : Tuple[int,int] = (600,600), improve_tile : bool = True, rotate_tile : bool = True, mirror_tile : bool = True, check_rois : bool = True, improve_fn : Callable = None, dtype : tf.DType = tf.uint16, verbose : bool = False) -> Dict[List[tf.Tensor],List[tf.Tensor]]:
     """
     Function to randomly select a tile from the image and roi data matrices.
 
@@ -112,9 +112,10 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
         improve_tile (bool): flag whether selected image tile should be improved (contrast, brightness, etc...)
         improve_fn (Callable): user-defined function handle to act on the selected image tile
         dtype (tf.DType): data type for Tensorflow output array
+        verbose (bool): verbosity. If False, all prints to stdout are suppressed.
 
     Returns:
-        tf.Tensor: enhanced greyscale image tiles and binary roi masks as Tensorflow Tensors
+        Dict[List[tf.Tensor],List[tf.Tensor]]: enhanced greyscale image tiles and binary roi masks as Tensorflow Tensors
     """
     
     if not isinstance(img_data,np.ndarray):
@@ -147,12 +148,13 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
             img_data = skimage.exposure.adjust_log(img_data, gain=2)
             #try clipping the pixel values on the lowest and highest 0.5% can improve constrast without amplifying the image noise
     
-    #TODO: preallocation with static array should be faster...
-    out_tiles = {'img':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False), \
-                 'roi':tf.TensorArray(dtype, size=0, dynamic_size=True, clear_after_read=False)}
+    #TODO: preallocation with static tensor should be faster...
+    out_tiles = {'img':[], \
+                 'roi':[]}
 
     i = 0
-    bar = tqdm(total=num_tiles)
+    if verbose:
+        bar = tqdm(total=num_tiles)
     while i < num_tiles:
         #get random edge
         rand_edge_x = np.random.randint(0,high=img_dims[0]-tile_size[0])
@@ -191,20 +193,21 @@ def get_random_tiles(img_data : np.ndarray, roi_data : np.ndarray, num_tiles : i
                 #if any pixel on tile boundaries belongs to any roi, discard tile and start over again
                 continue
 
-        out_tiles["img"].write(i, tile_img)
-        out_tiles["roi"].write(i, tile_roi)
+        out_tiles["img"].append(tf.constant(tile_img, dtype=tf.uint16))
+        out_tiles["roi"].append(tf.constant(tile_roi, dtype=tf.uint16))
         i += 1
-        bar.update()
+        if verbose:
+            bar.update()
 
     #transform TensorArray to Tensor
-    out_tiles["img"].stack()
-    out_tiles["roi"].stack()
-
-    bar.close()
+    #out_tiles["img"].stack()
+    #out_tiles["roi"].stack()
+    if verbose:
+        bar.close()
 
     return out_tiles
 
-def load_file_pair(img_file : str, roi_file : str) -> Dict[np.ndarray,np.ndarray]:
+def load_files(img_file : str, roi_file : str) -> Dict[np.ndarray,np.ndarray]:
     #test if img_file contains a valid file pat
     foo = os.stat(img_file)
     img_format = os.path.split(img_file)[-1].split(".")[-1]
@@ -265,7 +268,52 @@ def load_file_pair(img_file : str, roi_file : str) -> Dict[np.ndarray,np.ndarray
     
     return raw_img, roi_mask
 
-def generate_tile_set(img_files : Tuple[str], roi_files : Tuple[str]):
-    pass
+def generate_tile_set(img_path: str, roi_path : str = "", tiles_per_file : int = 32, tile_size : Tuple[int] = (600,600), img_type : str = "tif", roi_type : str = "zip", num_threads : int = 2) -> Dict[List[tf.Tensor],List[tf.Tensor]]:
+    """
+    Function to generate an augmented data set, a set of randomly selected, rotated and mirrored tiles,
+    from a set of image/roi file pairs
+
+    Args:
+        img_path (str): string containing the path to the image files
+        roi_path (str): optional string containing the path to the roi files
+        tiles_per_file (int): number of tiles to generated from each image / roi file pair
+        tile_size (Tuple[int]): tuple with tile size (has to be smaller or equal to image size)
+        num_threads (int): number of parallel workers to generate the tile set. If set to -1, maximum available number of CPU threads is used.
+
+    Returns:
+        tile_set (Dict[tf.TensorArray,tf.TensorArray]): set of tiles from augmented data set as TensorArrays
+    """
+
+    #force using CPU only
+    my_devices = tf.config.experimental.list_physical_devices(device_type="CPU")
+    tf.config.experimental.set_visible_devices(devices=my_devices, device_type="CPU")
+
+    #get valid pairs of image and roi file
+    files = get_valid_files(img_path, imgtype = img_type, roitype = roi_type)
+    img_files = files["img"]
+    roi_files = files["roi"]
+    array_size =  int(tiles_per_file * len(img_files))
+
+    #probe image datatype by loading a single file
+    test_img, test_mask = load_files(img_files[0],roi_files[0])
+    img_dtype = test_img.dtype
+    
+    # allocate arrays
+    tile_set = {'img': tf.TensorArray(img_dtype, size=array_size, dynamic_size=False, clear_after_read=False),\
+                'roi': tf.TensorArray(tf.bool, size=array_size, dynamic_size=False, clear_after_read=False)}
+    
+    if num_threads == -1:
+        num_threads = multiprocessing.cpu_count()
+
+    def task(img_file, roi_file):
+        img_data, roi_mask = load_files(img_file, roi_file)
+        tiles = get_random_tiles(img_data, roi_mask, num_tiles = tiles_per_file, tile_size = tile_size)
+        return tiles
+
+    # parallel execution
+    #tile_set = [task(img_files[i], roi_files[i]) for i in tqdm(range(len(img_files)))]
+    tile_set = Parallel(n_jobs = num_threads)(delayed(task)(files["img"][i],files["roi"][i]) for i in tqdm(range(len(files["img"]))))
+    return tile_set
+
 
 
