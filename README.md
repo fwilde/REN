@@ -7,10 +7,14 @@ Usage
 -----
 
 ```Python
-from ren.preprocessing import generate_tile_set
+from ren.preprocessing import TileGenerator
 
+gen = TileGenerator()
+gen.add_files("mixed/", img_type = "tif", roi_type = "zip")
+gen.generate_tiles(tiles_per_file = 8, tile_size = (600, 600), max_border_fill_fac = 0.1, \
+                    rotate_tile = True, mirror_tile = True, improve_tile = True, \
+                    num_threads = 4)
 # yields Dict[List[tf.Tensor],List[tf.Tensor]] with the image and roi mask tiles
-tile_set = generate_tile_set(img_path, roi_path, tile_size = (600,600), tiles_per_file = 32, num_threads = 2)
 
 ```
 
