@@ -14,7 +14,7 @@ gen.add_files("mixed/", img_type = "tif", roi_type = "zip")
 gen.generate_tiles(tiles_per_file = 8, tile_size = (600, 600), max_border_fill_fac = 0.1, \
                     rotate_tile = True, mirror_tile = True, improve_tile = True, \
                     num_threads = 4)
-# yields Dict[List[tf.Tensor],List[tf.Tensor]] with the image and roi mask tiles
+# yields tf.data.TensorSliceDataset with the image and roi mask tiles
 
 ```
 

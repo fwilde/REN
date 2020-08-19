@@ -124,7 +124,9 @@ class TileGenerator(object):
     #function to randomly load one of the images and rois, randomly select a tile within that image, randomly apply a rotation.#make sure to choose a tile size so that no ROI is cut to avoid boundary effects
     def _get_random_tiles(self, img_data : np.ndarray, roi_data : np.ndarray) -> Dict[List[tf.Tensor],List[tf.Tensor]]:
         """
-        Function to randomly select a tile from the image and roi data matrices.
+        Function to randomly select tiles from the image and roi data matrices.
+        After a tile was randomly selected, it is randomly rotated and mirrored and the contrast
+        is improved.
     
         Args:
             img_data (np.ndarray): path to image files
@@ -222,8 +224,12 @@ class TileGenerator(object):
                             #discard tile
                             continue
     
-            out_tiles["img"].append(tf.constant(tile_img, dtype=self.tile_img_dtype))
-            out_tiles["roi"].append(tf.constant(tile_roi, dtype=self.tile_roi_dtype))
+            if self.tile_img_dtype == np.uint16:
+                dtype_pow = 16
+            elif self.tile_img_dtype == np.uint8:
+                dtype_pow = 8
+            out_tiles["img"].append(tf.cast(tile_img, dtype=tf.float32)/np.power(2,dtype_pow))
+            out_tiles["roi"].append(tf.cast(tile_roi, dtype=tf.float32))
             i += 1
             if self.verbose:
                 bar.update()
@@ -312,7 +318,7 @@ class TileGenerator(object):
     
         return raw_img, roi_mask
 
-    def generate_tiles(self, tiles_per_file : int = 32, tile_size : Tuple[int] = (600,600), \
+    def generate_tiles(self, select_randomly = True, tiles_per_file : int = 32, tile_size : Tuple[int] = (600,600), \
                        rotate_tile : bool = True, mirror_tile : bool = True, \
                        check_rois : bool = True, max_border_fill_fac : float = 0.5, \
                        improve_tile : bool = True, improve_fn : Callable = None, \
@@ -323,6 +329,8 @@ class TileGenerator(object):
         from a set of image/roi file pairs
     
         Args:
+            select_randomly (bool): flag whether or not to select tiles randomly. If false, the image is divided equally.
+            If number of tiles along x or y is not an integer value, panning is applied to avoid boundary effects.
             tiles_per_file (int): number of tiles to generated from each image / roi file pair
             tile_size (Tuple[int]): tuple with tile size (has to be smaller or equal to image size)
             rotate_tile (bool): flag whether to perform a random rotation on the image tile
@@ -335,7 +343,7 @@ class TileGenerator(object):
             num_threads (int): number of parallel workers to generate the tile set. If set to -1, maximum available number of CPU threads is used.
     
         Returns:
-            tile_set (Dict[tf.TensorArray,tf.TensorArray]): set of tiles from augmented data set as TensorArrays
+            tile_set (tf.TensorSliceDataset): tensorflow data set with input image and roi mask tiles
         """
         
         self.rotate_tile = rotate_tile
@@ -366,16 +374,27 @@ class TileGenerator(object):
         if num_threads == -1:
             num_threads = multiprocessing.cpu_count()
     
-        def task(self, img_file, roi_file):
+        def task(self, img_file, roi_file, select_randomly):
             img_data, roi_mask = self._load_files(img_file, roi_file)
-            tiles = self._get_random_tiles(img_data, roi_mask)
+            if select_randomly:
+                tiles = self._get_random_tiles(img_data, roi_mask)
+            else:
+                raise NotImplementedError()
             return tiles
     
         # parallel execution
         #tile_set = [task(img_files[i], roi_files[i]) for i in tqdm(range(len(img_files)))]
-        tile_set = Parallel(n_jobs = num_threads)(delayed(task)(self,self.img_files[i],self.roi_files[i]) for i in tqdm(range(len(self.img_files))))
+        tile_set = Parallel(n_jobs = num_threads)(delayed(task)(self,self.img_files[i],self.roi_files[i], select_randomly) for i in tqdm(range(len(self.img_files))))
+        
+        #transform output
+        output = {'img':[],'roi':[]}
+        for i in range(len(tile_set)):
+            output["img"].extend(tile_set[i]["img"])
+            output["roi"].extend(tile_set[i]["roi"])
 
-        return tile_set
+        ds = tf.data.Dataset.from_tensor_slices((output["img"],output["roi"]))
+
+        return ds
 
 
 
